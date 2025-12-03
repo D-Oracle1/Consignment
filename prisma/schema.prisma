@@ -1,0 +1,292 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  CUSTOMER
+  ADMIN
+  WAREHOUSE
+  DRIVER
+}
+
+enum ShipmentStatus {
+  PENDING
+  RECEIVED
+  IN_TRANSIT
+  SORTING_FACILITY
+  OUT_FOR_DELIVERY
+  DELIVERED
+  RETURNED
+  FAILED
+  CANCELLED
+}
+
+enum PickupStatus {
+  PENDING
+  SCHEDULED
+  COMPLETED
+  CANCELLED
+}
+
+enum NotificationType {
+  EMAIL
+  SMS
+  BOTH
+}
+
+enum NotificationEvent {
+  PACKAGE_RECEIVED
+  IN_TRANSIT
+  OUT_FOR_DELIVERY
+  DELIVERED
+  FAILED_DELIVERY
+  PICKUP_SCHEDULED
+  PICKUP_COMPLETED
+}
+
+model User {
+  id            String         @id @default(cuid())
+  email         String         @unique
+  password      String
+  firstName     String
+  lastName      String
+  phone         String?
+  role          UserRole       @default(CUSTOMER)
+  avatar        String?
+  isActive      Boolean        @default(true)
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  // Relations
+  shipmentsAsSender    Shipment[]      @relation("SenderShipments")
+  shipmentsAsReceiver  Shipment[]      @relation("ReceiverShipments")
+  pickupRequests       PickupRequest[]
+  notifications        Notification[]
+  staffActivities      StaffActivity[]
+
+  @@index([email])
+  @@index([role])
+}
+
+model Shipment {
+  id                String          @id @default(cuid())
+  trackingNumber    String          @unique
+  status            ShipmentStatus  @default(PENDING)
+
+  // Sender Information
+  senderId          String
+  sender            User            @relation("SenderShipments", fields: [senderId], references: [id])
+  senderAddress     String
+  senderCity        String
+  senderState       String
+  senderZip         String
+  senderCountry     String          @default("USA")
+
+  // Receiver Information
+  receiverId        String?
+  receiver          User?           @relation("ReceiverShipments", fields: [receiverId], references: [id])
+  receiverName      String
+  receiverEmail     String?
+  receiverPhone     String
+  receiverAddress   String
+  receiverCity      String
+  receiverState     String
+  receiverZip       String
+  receiverCountry   String          @default("USA")
+
+  // Package Details
+  weight            Float           // in kg
+  length            Float?          // in cm
+  width             Float?          // in cm
+  height            Float?          // in cm
+  category          String?
+  description       String?
+  images            String[]        @default([])
+
+  // Pricing
+  estimatedCost     Float?
+  actualCost        Float?
+  isPaid            Boolean         @default(false)
+
+  // Delivery
+  estimatedDelivery DateTime?
+  actualDelivery    DateTime?
+  deliveryNotes     String?
+
+  // Timestamps
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+
+  // Relations
+  events            ShipmentEvent[]
+  pickupRequest     PickupRequest?
+
+  @@index([trackingNumber])
+  @@index([status])
+  @@index([senderId])
+  @@index([receiverId])
+  @@index([createdAt])
+}
+
+model ShipmentEvent {
+  id          String      @id @default(cuid())
+  shipmentId  String
+  shipment    Shipment    @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+
+  status      ShipmentStatus
+  location    String?
+  notes       String?
+  staffId     String?
+
+  createdAt   DateTime    @default(now())
+
+  @@index([shipmentId])
+  @@index([createdAt])
+}
+
+model PickupRequest {
+  id              String        @id @default(cuid())
+  customerId      String
+  customer        User          @relation(fields: [customerId], references: [id])
+
+  shipmentId      String?       @unique
+  shipment        Shipment?     @relation(fields: [shipmentId], references: [id])
+
+  // Pickup Details
+  pickupAddress   String
+  pickupCity      String
+  pickupState     String
+  pickupZip       String
+  pickupCountry   String        @default("USA")
+
+  preferredDate   DateTime
+  preferredTime   String
+
+  // Package Info
+  packageCount    Int           @default(1)
+  notes           String?
+
+  // Status
+  status          PickupStatus  @default(PENDING)
+  assignedTo      String?
+  scheduledDate   DateTime?
+  completedDate   DateTime?
+
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  @@index([customerId])
+  @@index([status])
+}
+
+model PricingRule {
+  id              String    @id @default(cuid())
+  name            String
+  description     String?
+
+  // Weight-based pricing (per kg)
+  baseRate        Float     @default(5.0)
+  weightMultiplier Float    @default(2.0)
+
+  // Distance-based (optional zones)
+  zoneFrom        String?
+  zoneTo          String?
+  zoneMultiplier  Float     @default(1.0)
+
+  // Volume-based
+  volumeMultiplier Float    @default(0.5)
+
+  // Category-based
+  category        String?
+  categoryRate    Float?
+
+  // Express/Priority
+  isExpress       Boolean   @default(false)
+  expressRate     Float?
+
+  isActive        Boolean   @default(true)
+  priority        Int       @default(0)
+
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([isActive])
+  @@index([priority])
+}
+
+model Notification {
+  id          String            @id @default(cuid())
+  userId      String
+  user        User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  type        NotificationType
+  event       NotificationEvent
+
+  title       String
+  message     String
+
+  emailSent   Boolean           @default(false)
+  smsSent     Boolean           @default(false)
+
+  isRead      Boolean           @default(false)
+
+  metadata    Json?             // Additional data (shipment info, etc.)
+
+  createdAt   DateTime          @default(now())
+
+  @@index([userId])
+  @@index([isRead])
+  @@index([createdAt])
+}
+
+model NotificationTemplate {
+  id          String            @id @default(cuid())
+  event       NotificationEvent @unique
+
+  emailSubject String?
+  emailBody    String?
+  smsBody      String?
+
+  isActive    Boolean           @default(true)
+
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+}
+
+model Settings {
+  id          String    @id @default(cuid())
+  key         String    @unique
+  value       String
+  category    String?   // branding, pricing, email, sms, etc.
+  description String?
+
+  updatedAt   DateTime  @updatedAt
+
+  @@index([category])
+}
+
+model StaffActivity {
+  id          String    @id @default(cuid())
+  staffId     String
+  staff       User      @relation(fields: [staffId], references: [id])
+
+  action      String    // e.g., "updated_shipment", "created_pickup", etc.
+  entityType  String?   // "shipment", "pickup", "user"
+  entityId    String?
+  description String?
+  metadata    Json?
+
+  createdAt   DateTime  @default(now())
+
+  @@index([staffId])
+  @@index([createdAt])
+  @@index([entityType, entityId])
+}
